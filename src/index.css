@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: radial-gradient(1200px 800px at 20% -10%, #14203a 0%, #0a0e17 45%, #070a12 100%);
+  color: #e6edf7;
+  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin, dark scrollbars to match the tool aesthetic. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #2a3852 transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #2a3852;
+  border-radius: 8px;
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-edge bg-panel/70 backdrop-blur-sm shadow-lg shadow-black/30;
+  }
+  .card-header {
+    @apply px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-subtle border-b border-edge/70;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium;
+  }
+  .field-label {
+    @apply block text-[11px] font-medium uppercase tracking-wide text-subtle mb-1;
+  }
+  .select {
+    @apply w-full rounded-md border border-edge bg-panelraised px-2 py-1.5 text-sm text-ink
+      focus:border-accent focus:outline-none;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+  }
+}

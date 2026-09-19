@@ -1,0 +1,11 @@
+# Copyright (C) 2026 NeuroRAN. All rights reserved.
+services:
+  resource-grid-visualizer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ocudu/resource-grid-visualizer:latest
+    container_name: resource-grid-visualizer
+    restart: unless-stopped
+    ports:
+      - "8080:80"

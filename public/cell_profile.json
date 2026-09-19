@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-09-19T06:34:17.852Z",
+  "sourceConfig": "config/generated/gnb.yml",
+  "cells": [
+    {
+      "name": "Cell PCI 231",
+      "pci": 231,
+      "band": "n78",
+      "dlArfcn": 628334,
+      "scsKhz": 30,
+      "channelBandwidthMhz": 50,
+      "nRb": 133,
+      "nAntDl": 4,
+      "nAntUl": 4,
+      "duplex": "TDD",
+      "tdd": {
+        "periodSlots": 10,
+        "nofDlSlots": 7,
+        "nofDlSymbols": 6,
+        "nofUlSlots": 2,
+        "nofUlSymbols": 4
+      },
+      "prachConfigIndex": 159,
+      "notes": []
+    }
+  ]
+}
