@@ -74,12 +74,30 @@ export function useOcuduLiveMetrics(): LiveTelemetryState {
     // 1. Parse du_high MAC DL metrics
     const macDl = data.du?.du_high?.mac?.dl?.[0];
     if (macDl) {
-      setMacMetrics({
-        pci: macDl.pci ?? 0,
-        average_latency_us: macDl.average_latency_us ?? 0,
-        max_latency_us: macDl.max_latency_us ?? 0,
-        min_latency_us: macDl.min_latency_us ?? 0,
-        cpu_usage_percent: macDl.cpu_usage_percent ?? 0,
+      const pci = macDl.pci ?? 0;
+      const avgLat = macDl.average_latency_us ?? 0;
+      const maxLat = macDl.max_latency_us ?? 0;
+      const minLat = macDl.min_latency_us ?? 0;
+      const cpu = macDl.cpu_usage_percent ?? 0;
+
+      setMacMetrics((prev) => {
+        if (
+          prev &&
+          prev.pci === pci &&
+          prev.average_latency_us === avgLat &&
+          prev.max_latency_us === maxLat &&
+          prev.min_latency_us === minLat &&
+          prev.cpu_usage_percent === cpu
+        ) {
+          return prev;
+        }
+        return {
+          pci,
+          average_latency_us: avgLat,
+          max_latency_us: maxLat,
+          min_latency_us: minLat,
+          cpu_usage_percent: cpu,
+        };
       });
     }
 
@@ -113,7 +131,12 @@ export function useOcuduLiveMetrics(): LiveTelemetryState {
           data.pdsch_prbs_used_per_tdd_slot_idx;
 
         if (Array.isArray(pdschSlots) && pdschSlots.length > 0) {
-          setPdschSlotPrbs(pdschSlots);
+          setPdschSlotPrbs((prev) => {
+            if (prev.length === pdschSlots.length && prev.every((v, i) => v === pdschSlots[i])) {
+              return prev;
+            }
+            return pdschSlots;
+          });
         }
 
         const puschSlots =
@@ -122,7 +145,12 @@ export function useOcuduLiveMetrics(): LiveTelemetryState {
           data.pusch_prbs_used_per_tdd_slot_idx;
 
         if (Array.isArray(puschSlots) && puschSlots.length > 0) {
-          setPuschSlotPrbs(puschSlots);
+          setPuschSlotPrbs((prev) => {
+            if (prev.length === puschSlots.length && prev.every((v, i) => v === puschSlots[i])) {
+              return prev;
+            }
+            return puschSlots;
+          });
         }
       }
     }

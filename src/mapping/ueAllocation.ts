@@ -42,82 +42,57 @@ export function partitionUePrbs(opts: PartitionUePrbOptions): UePrbSlice[] {
   }
 
   const numUes = ueList.length;
-
-  // Determine weighting metric based on link direction
   const isDl = direction === 'D' || direction === 'S';
   const weights = ueList.map((ue) => (isDl ? ue.dl_brate || 0 : ue.ul_brate || 0));
   const totalWeight = weights.reduce((sum, w) => sum + w, 0);
 
-  const slices: UePrbSlice[] = [];
-  let currentPrb = baseStartPrb;
+  const counts: number[] = new Array(numUes).fill(0);
 
   if (totalWeight <= 0) {
     // Distribute evenly among all UEs
     const baseCount = Math.floor(availablePrbs / numUes);
     let remainder = availablePrbs % numUes;
-
     for (let i = 0; i < numUes; i++) {
-      const count = baseCount + (remainder > 0 ? 1 : 0);
+      counts[i] = baseCount + (remainder > 0 ? 1 : 0);
       if (remainder > 0) remainder--;
-
-      if (count > 0 && currentPrb < nRb) {
-        const actualCount = Math.min(count, nRb - currentPrb);
-        const ue = ueList[i];
-        slices.push({
-          ueIndex: ue.ue,
-          rnti: ue.rnti,
-          prbStart: currentPrb,
-          prbEnd: currentPrb + actualCount - 1,
-          prbCount: actualCount,
-          theme: getUeTheme(ue.ue),
-          dlMbps: (ue.dl_brate || 0) / 1_000_000,
-          ulKbps: (ue.ul_brate || 0) / 1_000,
-        });
-        currentPrb += actualCount;
-      }
     }
   } else {
-    // Distribute proportionally to traffic load, ensuring minimum 1 PRB per UE if space allows
-    const rawShares = weights.map((w) => (w / totalWeight) * availablePrbs);
-    let allocatedSum = 0;
-    const counts = rawShares.map((share) => {
-      const c = Math.max(1, Math.round(share));
-      allocatedSum += c;
-      return c;
+    // Largest Remainder Method (Hamilton method) guarantees sum(counts) === availablePrbs exactly
+    const quotas = weights.map((w) => (w / totalWeight) * availablePrbs);
+    let totalFloored = 0;
+    const remainders = quotas.map((q, i) => {
+      const f = Math.floor(q);
+      counts[i] = f;
+      totalFloored += f;
+      return { index: i, rem: q - f };
     });
 
-    // Adjust any rounding discrepancies to match exact availablePrbs
-    let diff = availablePrbs - allocatedSum;
-    let idx = 0;
-    while (diff !== 0 && counts.length > 0) {
-      if (diff > 0) {
-        counts[idx % counts.length]++;
-        diff--;
-      } else if (counts[idx % counts.length] > 1) {
-        counts[idx % counts.length]--;
-        diff++;
-      }
-      idx++;
-      if (idx > counts.length * 2) break; // safety break
+    let leftover = availablePrbs - totalFloored;
+    remainders.sort((a, b) => b.rem - a.rem);
+    for (let i = 0; i < leftover && i < remainders.length; i++) {
+      counts[remainders[i].index]++;
     }
+  }
 
-    for (let i = 0; i < numUes; i++) {
-      const count = counts[i];
-      if (count > 0 && currentPrb < nRb) {
-        const actualCount = Math.min(count, nRb - currentPrb);
-        const ue = ueList[i];
-        slices.push({
-          ueIndex: ue.ue,
-          rnti: ue.rnti,
-          prbStart: currentPrb,
-          prbEnd: currentPrb + actualCount - 1,
-          prbCount: actualCount,
-          theme: getUeTheme(ue.ue),
-          dlMbps: (ue.dl_brate || 0) / 1_000_000,
-          ulKbps: (ue.ul_brate || 0) / 1_000,
-        });
-        currentPrb += actualCount;
-      }
+  const slices: UePrbSlice[] = [];
+  let currentPrb = baseStartPrb;
+
+  for (let i = 0; i < numUes; i++) {
+    const count = counts[i];
+    if (count > 0 && currentPrb < nRb) {
+      const actualCount = Math.min(count, nRb - currentPrb);
+      const ue = ueList[i];
+      slices.push({
+        ueIndex: ue.ue,
+        rnti: ue.rnti,
+        prbStart: currentPrb,
+        prbEnd: currentPrb + actualCount - 1,
+        prbCount: actualCount,
+        theme: getUeTheme(ue.ue),
+        dlMbps: (ue.dl_brate || 0) / 1_000_000,
+        ulKbps: (ue.ul_brate || 0) / 1_000,
+      });
+      currentPrb += actualCount;
     }
   }
 

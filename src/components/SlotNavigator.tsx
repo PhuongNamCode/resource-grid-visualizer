@@ -1,5 +1,6 @@
 // Copyright (C) 2026 NeuroRAN. All rights reserved.
 
+import { memo } from 'react';
 import type { GridParams, SlotDirection } from '../types';
 import { slotLayout, periodLength, prachSlotIndex } from '../mapping';
 
@@ -17,7 +18,7 @@ const DIR_STYLE: Record<SlotDirection, string> = {
   S: 'bg-[#f2a541]/20 border-[#f7bd6e] text-[#f6d199]',
 };
 
-export function SlotNavigator({
+export const SlotNavigator = memo(function SlotNavigator({
   params,
   selectedSlot,
   onSelect,
@@ -125,4 +126,4 @@ export function SlotNavigator({
       </div>
     </div>
   );
-}
+});

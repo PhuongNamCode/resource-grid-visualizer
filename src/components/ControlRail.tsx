@@ -1,6 +1,6 @@
 // Copyright (C) 2026 NeuroRAN. All rights reserved.
 
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import type { CellProfile, GridParams } from '../types';
 import { coreset0Entry } from '../mapping';
 
@@ -60,7 +60,7 @@ function ReadOnlySpecRow({
   );
 }
 
-export function ControlRail({
+export const ControlRail = memo(function ControlRail({
   profile,
   params,
 }: ControlRailProps) {
@@ -130,4 +130,4 @@ export function ControlRail({
       </Section>
     </div>
   );
-}
+});

@@ -128,6 +128,41 @@ describe('ueAllocation (Multi-UE Spectrum Partitioning)', () => {
     expect(slices[0].prbStart).toBe(12);
   });
 
+  it('never over-allocates when activePrbs < numUes (low PRB count)', () => {
+    const slices = partitionUePrbs({
+      activePrbs: 2,
+      ueList: sampleUeList, // 4 UEs
+      direction: 'U',
+      nRb: 133,
+    });
+
+    const totalAllocated = slices.reduce((sum, s) => sum + s.prbCount, 0);
+    expect(totalAllocated).toBe(2);
+    expect(slices.length).toBe(2);
+  });
+
+  it('proportionally partitions PRBs based on unequal throughput weights', () => {
+    const unequalUes: LiveUeMetric[] = [
+      { ...sampleUeList[0], dl_brate: 300_000_000 }, // 75% of traffic
+      { ...sampleUeList[1], dl_brate: 100_000_000 }, // 25% of traffic
+    ];
+
+    const slices = partitionUePrbs({
+      activePrbs: 100,
+      ueList: unequalUes,
+      direction: 'D',
+      nRb: 133,
+    });
+
+    expect(slices.length).toBe(2);
+    expect(slices[0].prbCount).toBe(75);
+    expect(slices[1].prbCount).toBe(25);
+    expect(slices[0].prbStart).toBe(0);
+    expect(slices[0].prbEnd).toBe(74);
+    expect(slices[1].prbStart).toBe(75);
+    expect(slices[1].prbEnd).toBe(99);
+  });
+
   it('returns empty array when ueList is empty or activePrbs is 0', () => {
     expect(partitionUePrbs({ activePrbs: 24, ueList: [], direction: 'D', nRb: 133 })).toEqual([]);
     expect(partitionUePrbs({ activePrbs: 0, ueList: sampleUeList, direction: 'D', nRb: 133 })).toEqual([]);

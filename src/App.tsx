@@ -1,9 +1,13 @@
-// Copyright (C) 2026 NeuroRAN. All rights reserved.
-
 import { useEffect, useMemo, useState } from 'react';
 import { Owner } from './types';
 import type { CellProfile, ChannelToggles, LiveSlotAlloc } from './types';
-import { computeSlotGrid, defaultParamsForProfile, prachSlotIndex } from './mapping';
+import {
+  computeSlotGrid,
+  defaultParamsForProfile,
+  prachSlotIndex,
+  partitionUePrbs,
+  type UePrbSlice,
+} from './mapping';
 import { useProfile } from './hooks/useProfile';
 import { useOcuduLiveMetrics } from './hooks/useOcuduLiveMetrics';
 import { ControlRail, type ViewState } from './components/ControlRail';
@@ -31,6 +35,7 @@ export function App() {
   const [selectedRe, setSelectedRe] = useState<Selection | null>(null);
   const [pinnedOwners, setPinnedOwners] = useState<Owner[] | null>(null);
   const [hoverOwners, setHoverOwners] = useState<Owner[] | null>(null);
+  const [selectedUeIndex, setSelectedUeIndex] = useState<number | null>(null);
 
   const emphasized = hoverOwners ?? pinnedOwners;
 
@@ -48,13 +53,17 @@ export function App() {
     setHoverOwners(null);
   }, [profile]);
 
-  // Dynamic live allocation for the currently viewed slot
+  // Dynamic live allocation for the currently viewed slot - depend ONLY on scalar values
+  const pdschPrbsForSlot = live.pdschSlotPrbs?.[selectedSlot];
+  const puschPrbsForSlot = live.puschSlotPrbs?.[selectedSlot];
+
   const liveAlloc: LiveSlotAlloc | undefined = useMemo(() => {
+    if (pdschPrbsForSlot === undefined && puschPrbsForSlot === undefined) return undefined;
     return {
-      pdschPrbs: live.pdschSlotPrbs?.[selectedSlot],
-      puschPrbs: live.puschSlotPrbs?.[selectedSlot],
+      pdschPrbs: pdschPrbsForSlot,
+      puschPrbs: puschPrbsForSlot,
     };
-  }, [live.pdschSlotPrbs, live.puschSlotPrbs, selectedSlot]);
+  }, [pdschPrbsForSlot, puschPrbsForSlot]);
 
   const grid = useMemo(
     () => (params ? computeSlotGrid(params, selectedSlot, liveAlloc) : null),
@@ -74,6 +83,30 @@ export function App() {
       ? (live.pdschSlotPrbs?.[selectedSlot] ?? 0)
       : (live.puschSlotPrbs?.[selectedSlot] ?? 0);
   const activePct = params && params.nRb > 0 ? ((activePrbs / params.nRb) * 100).toFixed(1) : '0.0';
+
+  const isPrachSlot = params ? selectedSlot === prachSlotIndex(params) : false;
+  const ueSlices: UePrbSlice[] = useMemo(() => {
+    if (!params || !grid) return [];
+    return partitionUePrbs({
+      activePrbs,
+      ueList: live.ueList,
+      direction: grid.direction,
+      isPrachSlot,
+      nRb: params.nRb,
+    });
+  }, [params, grid, isPrachSlot, activePrbs, live.ueList]);
+
+  const handleSelectUe = (ueIndex: number | null) => {
+    setSelectedUeIndex(ueIndex);
+    if (ueIndex === null || !params) return;
+
+    const slice = ueSlices.find((s) => s.ueIndex === ueIndex);
+    if (slice && slice.prbCount > 0) {
+      const targetCount = Math.min(params.nRb, Math.max(12, slice.prbCount + 4));
+      const targetStart = Math.max(0, Math.min(slice.prbStart - 2, params.nRb - targetCount));
+      setView((v) => (v ? { ...v, prbStart: targetStart, prbCount: targetCount } : v));
+    }
+  };
 
   // Click on a channel in toolbar: pin/isolate, activate toggle if off, and focus both Slot and the RBs it contains
   const handleChannelClick = (layerId: string, owners: Owner[]) => {
@@ -277,6 +310,9 @@ export function App() {
           onHoverOwners={setHoverOwners}
           onPinOwners={setPinnedOwners}
           onSelectChannel={handleChannelClick}
+          ueSlices={ueSlices}
+          selectedUeIndex={selectedUeIndex}
+          onSelectUe={handleSelectUe}
         />
 
         <div className="card p-3">
@@ -310,12 +346,42 @@ export function App() {
 
           {/* Live allocation verification pill */}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs bg-panel/60 rounded px-2.5 py-1 text-subtle">
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <span className="text-emerald-400 font-semibold">● Scheduled Spectrum:</span>
-              <span className="text-ink font-medium">PRB 0 &ndash; {Math.max(0, activePrbs - 1)} ({activePrbs} PRBs)</span>
+              <span className="text-ink font-medium">
+                {activePrbs <= 0
+                  ? 'None (0 PRBs)'
+                  : isPrachSlot && grid.direction === 'U'
+                    ? `PRB 12 \u2013 ${12 + activePrbs - 1} (${activePrbs} PRBs)`
+                    : `PRB 0 \u2013 ${activePrbs - 1} (${activePrbs} PRBs)`}
+              </span>
               <span className="text-subtle">|</span>
               <span className="text-slate-400 font-semibold">○ Idle Spectrum:</span>
-              <span className="text-ink font-medium">PRB {activePrbs} &ndash; {params.nRb - 1} ({Math.max(0, params.nRb - activePrbs)} PRBs)</span>
+              <span className="text-ink font-medium">
+                {activePrbs <= 0
+                  ? `PRB 0 \u2013 ${params.nRb - 1} (${params.nRb} PRBs)`
+                  : isPrachSlot && grid.direction === 'U'
+                    ? 12 + activePrbs < params.nRb
+                      ? `PRB ${12 + activePrbs} \u2013 ${params.nRb - 1} (${params.nRb - 12 - activePrbs} PRBs)`
+                      : 'None'
+                    : activePrbs < params.nRb
+                      ? `PRB ${activePrbs} \u2013 ${params.nRb - 1} (${params.nRb - activePrbs} PRBs)`
+                      : 'None'}
+              </span>
+              {selectedUeIndex !== null && (
+                <>
+                  <span className="text-subtle">|</span>
+                  <span className="text-accent font-semibold">★ Filtered UE:</span>
+                  <span className="text-ink font-bold">UE {selectedUeIndex}</span>
+                  <button
+                    type="button"
+                    onClick={() => handleSelectUe(null)}
+                    className="ml-1 text-[11px] text-accent hover:underline font-medium cursor-pointer"
+                  >
+                    (Reset to All UEs)
+                  </button>
+                </>
+              )}
             </div>
             <div className="text-[11px] text-subtle">
               {grid.direction === 'D' || grid.direction === 'S' ? 'PDSCH DL Allocation' : 'PUSCH UL Allocation'}
@@ -332,6 +398,8 @@ export function App() {
             selected={selectedRe}
             onSelect={setSelectedRe}
             activePrbs={activePrbs}
+            ueSlices={ueSlices}
+            selectedUeIndex={selectedUeIndex}
           />
         </div>
 
@@ -341,6 +409,8 @@ export function App() {
           paused={live.paused}
           totalDlMbps={live.totalDlMbps}
           totalUlKbps={live.totalUlKbps}
+          selectedUeIndex={selectedUeIndex}
+          onSelectUe={handleSelectUe}
         />
 
         {/* 3GPP Specification Cards placed below Active UEs Telemetry */}

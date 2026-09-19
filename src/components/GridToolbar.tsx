@@ -1,8 +1,8 @@
-// Copyright (C) 2026 NeuroRAN. All rights reserved.
-
+import { memo } from 'react';
 import type { CellProfile, ChannelToggles, GridParams, Owner } from '../types';
 import type { ViewState } from './ControlRail';
 import { Owner as OwnerEnum } from '../types';
+import type { UePrbSlice } from '../mapping';
 
 interface GridToolbarProps {
   profile: CellProfile;
@@ -14,6 +14,9 @@ interface GridToolbarProps {
   onHoverOwners: (owners: Owner[] | null) => void;
   onPinOwners: (owners: Owner[]) => void;
   onSelectChannel?: (layerId: string, owners: Owner[]) => void;
+  ueSlices?: UePrbSlice[];
+  selectedUeIndex?: number | null;
+  onSelectUe?: (ueIndex: number | null) => void;
 }
 
 interface ChannelLayerDef {
@@ -93,7 +96,7 @@ const CHANNEL_LAYERS: ChannelLayerDef[] = [
   },
 ];
 
-export function GridToolbar({
+export const GridToolbar = memo(function GridToolbar({
   profile,
   params,
   setParams,
@@ -103,6 +106,9 @@ export function GridToolbar({
   onHoverOwners,
   onPinOwners,
   onSelectChannel,
+  ueSlices = [],
+  selectedUeIndex = null,
+  onSelectUe,
 }: GridToolbarProps) {
   const prbOptions = Array.from(
     new Set([12, 24, 51, 106, 133, 273, profile.nRb].filter((n) => n <= profile.nRb)),
@@ -121,42 +127,92 @@ export function GridToolbar({
   };
 
   return (
-    <div className="card p-2 px-3 flex flex-wrap items-center gap-2 text-xs">
-      {/* Viewport Controls: Visible PRBs & Start PRB */}
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-1.5">
-          <span className="text-subtle font-medium">Visible PRBs:</span>
-          <select
-            className="select text-xs py-1 px-2 w-auto font-medium cursor-pointer"
-            value={view.prbCount}
-            onChange={(e) =>
-              setView((v) => ({ ...v, prbCount: Number(e.target.value), prbStart: 0 }))
-            }
-          >
-            {prbOptions.map((n) => (
-              <option key={n} value={n}>
-                {n} PRBs{n === profile.nRb ? ' (fit all)' : ''}
-              </option>
-            ))}
-          </select>
+    <div className="card p-2 px-3 flex flex-wrap items-center gap-3 text-xs">
+      {/* Left Section: Viewport PRB Controls & UE Selector below */}
+      <div className="flex flex-col gap-1.5 shrink-0">
+        {/* Row 1: Visible PRBs & Start PRB */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5">
+            <span className="text-subtle font-medium">Visible PRBs:</span>
+            <select
+              className="select text-xs py-1 px-2 w-auto font-medium cursor-pointer"
+              value={view.prbCount}
+              onChange={(e) =>
+                setView((v) => ({ ...v, prbCount: Number(e.target.value), prbStart: 0 }))
+              }
+            >
+              {prbOptions.map((n) => (
+                <option key={n} value={n}>
+                  {n} PRBs{n === profile.nRb ? ' (fit all)' : ''}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <span className="text-subtle font-medium">Start PRB:</span>
+            <span className="num font-semibold text-ink w-6 text-right">{view.prbStart}</span>
+            <input
+              type="range"
+              className="w-24 accent-accent cursor-pointer"
+              min={0}
+              max={Math.max(0, params.nRb - view.prbCount)}
+              value={view.prbStart}
+              onChange={(e) => setView((v) => ({ ...v, prbStart: Number(e.target.value) }))}
+            />
+          </div>
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <span className="text-subtle font-medium">Start PRB:</span>
-          <span className="num font-semibold text-ink w-6 text-right">{view.prbStart}</span>
-          <input
-            type="range"
-            className="w-24 accent-accent cursor-pointer"
-            min={0}
-            max={Math.max(0, params.nRb - view.prbCount)}
-            value={view.prbStart}
-            onChange={(e) => setView((v) => ({ ...v, prbStart: Number(e.target.value) }))}
-          />
-        </div>
+        {/* Row 2: UE Selector on the left below Visible PRBs */}
+        {ueSlices && ueSlices.length > 0 && onSelectUe && (
+          <div className="flex items-center gap-1">
+            <span className="text-[11px] text-subtle font-semibold uppercase tracking-wider mr-0.5">
+              UE:
+            </span>
+            <button
+              type="button"
+              onClick={() => onSelectUe(null)}
+              className={`px-2 py-0.5 rounded text-[11px] font-semibold border transition cursor-pointer ${
+                selectedUeIndex === null
+                  ? 'bg-accent/25 border-accent text-white ring-1 ring-accent'
+                  : 'border-edge/50 bg-panel/40 text-subtle hover:text-ink'
+              }`}
+              title="Show all connected UEs on the grid"
+            >
+              All ({ueSlices.length})
+            </button>
+            {ueSlices.map((slice) => {
+              const isSelected = selectedUeIndex === slice.ueIndex;
+              return (
+                <button
+                  key={slice.ueIndex}
+                  type="button"
+                  onClick={() => onSelectUe(isSelected ? null : slice.ueIndex)}
+                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold border transition cursor-pointer ${
+                    isSelected
+                      ? 'ring-2 ring-white text-white shadow-md'
+                      : 'border-edge/50 bg-panel/40 opacity-85 hover:opacity-100 text-ink'
+                  }`}
+                  style={{
+                    backgroundColor: isSelected ? slice.theme.fill : undefined,
+                    borderColor: slice.theme.border,
+                  }}
+                  title={`UE ${slice.ueIndex} (RNTI 0x${slice.rnti.toString(16).toUpperCase()}) \u00b7 ${slice.prbCount} PRBs (RB ${slice.prbStart}\u2013${slice.prbEnd}) \u00b7 ${slice.dlMbps.toFixed(1)} Mbps DL - click to isolate`}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full shrink-0"
+                    style={{ backgroundColor: slice.theme.fill }}
+                  />
+                  <span>UE {slice.ueIndex}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       {/* Vertical Divider */}
-      <div className="hidden sm:block h-4 w-px bg-edge/70 mx-1 shrink-0" />
+      <div className="hidden sm:block h-10 w-px bg-edge/70 mx-1 shrink-0" />
 
       {/* Channel Display Layers */}
       <div className="flex flex-wrap items-center gap-1.5 flex-1">
@@ -227,17 +283,7 @@ export function GridToolbar({
             </div>
           );
         })}
-
-        {pinnedOwners && pinnedOwners.length > 0 && (
-          <button
-            type="button"
-            onClick={() => onPinOwners([])}
-            className="text-[11px] text-accent hover:underline font-medium cursor-pointer ml-auto shrink-0"
-          >
-            Clear Pin
-          </button>
-        )}
       </div>
     </div>
   );
-}
+});

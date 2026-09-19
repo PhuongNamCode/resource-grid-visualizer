@@ -1,15 +1,24 @@
-// Copyright (C) 2026 NeuroRAN. All rights reserved.
-
+import { memo } from 'react';
 import type { LiveUeMetric } from '../types';
+import { getUeTheme } from '../theme';
 
 interface LiveUePanelProps {
   ueList: LiveUeMetric[];
   paused: boolean;
   totalDlMbps: number;
   totalUlKbps: number;
+  selectedUeIndex?: number | null;
+  onSelectUe?: (ueIndex: number | null) => void;
 }
 
-export function LiveUePanel({ ueList, paused, totalDlMbps, totalUlKbps }: LiveUePanelProps) {
+export const LiveUePanel = memo(function LiveUePanel({
+  ueList,
+  paused,
+  totalDlMbps,
+  totalUlKbps,
+  selectedUeIndex = null,
+  onSelectUe,
+}: LiveUePanelProps) {
   return (
     <div className="card overflow-hidden">
       <div className="card-header flex flex-wrap items-center justify-between gap-2">
@@ -19,6 +28,15 @@ export function LiveUePanel({ ueList, paused, totalDlMbps, totalUlKbps }: LiveUe
           <span className="chip border border-accent/40 bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
             {ueList.length} Connected
           </span>
+          {selectedUeIndex !== null && onSelectUe && (
+            <button
+              type="button"
+              onClick={() => onSelectUe(null)}
+              className="ml-2 text-[11px] text-accent hover:underline font-medium cursor-pointer"
+            >
+              Reset to All UEs
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-3 text-xs">
@@ -63,6 +81,8 @@ export function LiveUePanel({ ueList, paused, totalDlMbps, totalUlKbps }: LiveUe
             </thead>
             <tbody className="divide-y divide-edge/40">
               {ueList.map((ue) => {
+                const theme = getUeTheme(ue.ue);
+                const isSelected = selectedUeIndex === ue.ue;
                 const dlMbps = (ue.dl_brate / 1_000_000).toFixed(1);
                 const ulKbps = (ue.ul_brate / 1_000).toFixed(0);
                 const rntiHex = `0x${ue.rnti.toString(16).toUpperCase()}`;
@@ -72,13 +92,34 @@ export function LiveUePanel({ ueList, paused, totalDlMbps, totalUlKbps }: LiveUe
                     : '0.0';
 
                 return (
-                  <tr key={ue.rnti} className="hover:bg-white/[0.02] transition">
+                  <tr
+                    key={ue.rnti}
+                    onClick={() => onSelectUe?.(isSelected ? null : ue.ue)}
+                    className={`cursor-pointer transition select-none ${
+                      isSelected
+                        ? 'bg-accent/15 ring-1 ring-inset ring-accent'
+                        : 'hover:bg-white/[0.04]'
+                    }`}
+                    title="Click row to focus / isolate this UE on the resource grid"
+                  >
                     <td className="px-3 py-2.5 font-medium text-ink">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-bold text-accent">UE {ue.ue}</span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="h-3 w-3 rounded-full shrink-0 shadow-sm"
+                          style={{ backgroundColor: theme.fill, border: `1.5px solid ${theme.border}` }}
+                          title={`Color on resource grid: ${theme.name}`}
+                        />
+                        <span className="font-bold" style={{ color: theme.badgeText }}>
+                          UE {ue.ue}
+                        </span>
                         <span className="text-[11px] text-subtle font-mono">
                           {rntiHex} ({ue.rnti})
                         </span>
+                        {isSelected && (
+                          <span className="ml-1 text-[9px] font-extrabold uppercase px-1 rounded bg-accent/30 text-accent">
+                            Focused
+                          </span>
+                        )}
                       </div>
                     </td>
                     <td className="px-3 py-2.5">
@@ -135,4 +176,4 @@ export function LiveUePanel({ ueList, paused, totalDlMbps, totalUlKbps }: LiveUe
       )}
     </div>
   );
-}
+});

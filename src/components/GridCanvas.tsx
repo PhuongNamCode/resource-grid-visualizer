@@ -24,7 +24,7 @@ export interface GridCanvasProps {
   selectedUeIndex?: number | null;
 }
 
-const MARGIN = { left: 64, right: 16, top: 20, bottom: 32 };
+const MARGIN = { left: 76, right: 16, top: 20, bottom: 32 };
 
 function baseCellSize(prbCount: number): { cw: number; ch: number } {
   if (prbCount <= 12) return { cw: 92, ch: 24 };
@@ -54,7 +54,8 @@ export function GridCanvas({
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
-      setContainerWidth(el.clientWidth);
+      const w = el.clientWidth;
+      setContainerWidth((prev) => (Math.abs(prev - w) > 2 ? w : prev));
     };
     update();
     const ro = new ResizeObserver(() => update());
@@ -117,19 +118,51 @@ export function GridCanvas({
         ctx.font = `700 ${fontSize}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       }
 
-      // Fast RE cells rendering
+      // Pre-index UE slices by PRB for instant O(1) direct lookup across all 14 symbols
+      const ueByPrb: (UePrbSlice | undefined)[] = new Array(grid.nRb);
+      if (ueSlices.length > 0) {
+        for (let i = 0; i < ueSlices.length; i++) {
+          const s = ueSlices[i];
+          for (let p = s.prbStart; p <= s.prbEnd; p++) {
+            ueByPrb[p] = s;
+          }
+        }
+      }
+
+      // State caching to minimize GPU pipeline switches
+      let currentAlpha = 1;
+      let currentFill = '';
+      let currentStroke = '';
+
+      // High-performance RE cells rendering
       for (let row = 0; row < visSc; row++) {
         const kGlobal = topSc - row;
         if (kGlobal < 0 || kGlobal >= grid.subcarriers) continue;
         const y = MARGIN.top + row * cellH;
         const prbGlobal = Math.floor(kGlobal / SUBCARRIERS_PER_RB);
+        const ueForRow = ueByPrb[prbGlobal];
 
         for (let l = 0; l < SYMBOLS_PER_SLOT; l++) {
           const owner = grid.owners[l * grid.subcarriers + kGlobal] as Owner;
           const style = CHANNEL_STYLES[owner];
-          const match = isOwnerEmphasized(owner);
-          let dim = emphasized !== null && !match && owner !== Owner.Empty && owner !== Owner.Guard;
           const x = MARGIN.left + l * cellW;
+
+          // Fast path for Idle and Guard cells (comprises >85% of partial/unallocated slots)
+          if (owner === Owner.Empty || owner === Owner.Guard) {
+            if (currentAlpha !== 1) {
+              ctx.globalAlpha = 1;
+              currentAlpha = 1;
+            }
+            if (currentFill !== style.fill) {
+              ctx.fillStyle = style.fill;
+              currentFill = style.fill;
+            }
+            ctx.fillRect(x, y, cellW, cellH);
+            continue;
+          }
+
+          const match = isOwnerEmphasized(owner);
+          let dim = emphasized !== null && !match;
 
           // Check if this RE belongs to a UE-dedicated channel (PDSCH, PUSCH, PUCCH, DM-RS)
           const isUeChannel =
@@ -139,11 +172,11 @@ export function GridCanvas({
             owner === Owner.PuschDmrs ||
             owner === Owner.Pucch;
 
-          const ueForRb = isUeChannel && ueSlices.length > 0 ? findUeForPrb(ueSlices, prbGlobal) : undefined;
+          const ueForRb = isUeChannel ? ueForRow : undefined;
 
-          // If a specific UE is selected, dim other UEs' channels
+          // If a specific UE is selected, dim other UEs' channels (or unassigned UE channels)
           if (selectedUeIndex !== null && selectedUeIndex !== undefined) {
-            if (isUeChannel && ueForRb && ueForRb.ueIndex !== selectedUeIndex) {
+            if (isUeChannel && (!ueForRb || ueForRb.ueIndex !== selectedUeIndex)) {
               dim = true;
             }
           }
@@ -163,40 +196,61 @@ export function GridCanvas({
             // Differentiated text label per UE
             if (cellW >= 55) {
               labelText = isDmrs ? `U${ueForRb.ueIndex}:DMRS` : owner === Owner.Pucch ? `U${ueForRb.ueIndex}:PUCCH` : `U${ueForRb.ueIndex}:${style.short}`;
-            } else if (cellW >= 34) {
-              labelText = isDmrs ? `DMRS-U${ueForRb.ueIndex}` : `UE${ueForRb.ueIndex}`;
+            } else if (cellW >= 32) {
+              labelText = isDmrs ? `U${ueForRb.ueIndex}:DM` : `UE${ueForRb.ueIndex}`;
             } else {
               labelText = isDmrs ? `D${ueForRb.ueIndex}` : `U${ueForRb.ueIndex}`;
             }
           }
 
-          ctx.globalAlpha = dim ? 0.15 : 1;
-          ctx.fillStyle = fill;
+          // Fill RE cell with cached alpha & fillStyle
+          const targetAlpha = dim ? 0.15 : 1;
+          if (currentAlpha !== targetAlpha) {
+            ctx.globalAlpha = targetAlpha;
+            currentAlpha = targetAlpha;
+          }
+          if (currentFill !== fill) {
+            ctx.fillStyle = fill;
+            currentFill = fill;
+          }
           ctx.fillRect(x, y, cellW, cellH);
 
-          // Subcarrier cell border
-          if (cellH >= 3 && cellW >= 3) {
-            ctx.strokeStyle = dim ? 'rgba(0,0,0,0.2)' : border;
+          // Subcarrier cell border (rendered only when cells are sufficiently large to be crisp)
+          if (cellH >= 6 && cellW >= 12) {
+            const targetStroke = dim ? 'rgba(0,0,0,0.2)' : border;
+            if (currentStroke !== targetStroke) {
+              ctx.strokeStyle = targetStroke;
+              currentStroke = targetStroke;
+            }
             ctx.lineWidth = 1;
             ctx.strokeRect(x + 0.5, y + 0.5, cellW - 1, cellH - 1);
           }
 
           // Always render channel text labels (unconditional, permanent for all channel cells)
-          if (canRenderText && labelText && owner !== Owner.Empty && owner !== Owner.Guard) {
-            ctx.globalAlpha = dim ? 0.2 : 1;
-            ctx.fillStyle = textColor;
+          if (canRenderText && labelText) {
+            const textAlpha = dim ? 0.2 : 1;
+            if (currentAlpha !== textAlpha) {
+              ctx.globalAlpha = textAlpha;
+              currentAlpha = textAlpha;
+            }
+            if (currentFill !== textColor) {
+              ctx.fillStyle = textColor;
+              currentFill = textColor;
+            }
             ctx.fillText(labelText, x + cellW / 2, y + cellH / 2);
           }
         }
       }
-      ctx.globalAlpha = 1;
+
+      if (currentAlpha !== 1) {
+        ctx.globalAlpha = 1;
+      }
 
       // PRB gridlines (every 12 subcarriers)
       ctx.strokeStyle = 'rgba(180,200,230,0.18)';
       ctx.lineWidth = 1;
       const showEveryRb = prbCount <= 24 ? 1 : prbCount <= 51 ? 2 : prbCount <= 106 ? 5 : 10;
       ctx.font = '11px ui-monospace, monospace';
-      ctx.textAlign = 'right';
 
       for (let rb = 0; rb <= prbCount; rb++) {
         const scFromTop = visSc - rb * SUBCARRIERS_PER_RB;
@@ -213,18 +267,23 @@ export function GridCanvas({
           const ueForRb = ueSlices.length > 0 ? findUeForPrb(ueSlices, currentRb) : undefined;
 
           if (ueForRb) {
-            // Draw UE color badge on PRB axis
+            // Draw UE color badge on left of PRB axis
             ctx.fillStyle = ueForRb.theme.fill;
-            ctx.fillRect(MARGIN.left - 52, yc - 5, 3, 10);
+            ctx.fillRect(MARGIN.left - 70, yc - 5, 3, 10);
             ctx.fillStyle = ueForRb.theme.badgeText;
             ctx.font = 'bold 9px ui-monospace, monospace';
-            ctx.fillText(`U${ueForRb.ueIndex}`, MARGIN.left - 40, yc);
+            ctx.textAlign = 'left';
+            ctx.fillText(`U${ueForRb.ueIndex}`, MARGIN.left - 64, yc);
+
+            // Draw RB number aligned to the right
             ctx.fillStyle = '#e2e8f0';
             ctx.font = '11px ui-monospace, monospace';
+            ctx.textAlign = 'right';
             ctx.fillText(`RB ${currentRb}`, MARGIN.left - 6, yc);
           } else {
             ctx.fillStyle = isScheduledRb ? '#60a5fa' : '#8aa0bd';
             ctx.font = '11px ui-monospace, monospace';
+            ctx.textAlign = 'right';
             ctx.fillText(`RB ${currentRb}`, MARGIN.left - 8, yc);
           }
         }

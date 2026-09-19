@@ -1,5 +1,6 @@
 // Copyright (C) 2026 NeuroRAN. All rights reserved.
 
+import { memo } from 'react';
 import type { CellProfile, CellProfileFile } from '../types';
 
 interface HeaderProps {
@@ -15,7 +16,7 @@ interface HeaderProps {
   totalDlMbps: number;
 }
 
-export function Header({
+export const Header = memo(function Header({
   profileFile,
   profile,
   selectedCellIdx,
@@ -98,4 +99,4 @@ export function Header({
       </div>
     </header>
   );
-}
+});
