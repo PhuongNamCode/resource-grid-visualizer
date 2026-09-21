@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import type { LiveUeMetric } from '../types';
+import type { LiveUeMetric, UeDiagnostics } from '../types';
 import { getUeTheme } from '../theme';
 
 interface LiveUePanelProps {
@@ -9,6 +9,7 @@ interface LiveUePanelProps {
   totalUlKbps: number;
   selectedUeIndex?: number | null;
   onSelectUe?: (ueIndex: number | null) => void;
+  ueDiagnostics?: UeDiagnostics;
 }
 
 export const LiveUePanel = memo(function LiveUePanel({
@@ -18,7 +19,10 @@ export const LiveUePanel = memo(function LiveUePanel({
   totalUlKbps,
   selectedUeIndex = null,
   onSelectUe,
+  ueDiagnostics,
 }: LiveUePanelProps) {
+  const diag = ueDiagnostics;
+  const hasDropCount = diag && diag.rawUeCount !== ueList.length;
   return (
     <div className="card overflow-hidden">
       <div className="card-header flex flex-wrap items-center justify-between gap-2">
@@ -28,6 +32,29 @@ export const LiveUePanel = memo(function LiveUePanel({
           <span className="chip border border-accent/40 bg-accent/15 px-1.5 py-0.5 text-xs text-accent">
             {ueList.length} Connected
           </span>
+          {diag && (
+            <span
+              className="text-[11px] text-subtle"
+              title={
+                `Raw ue_list records: ${diag.rawUeCount}\n` +
+                `Valid: ${ueList.length}` +
+                (diag.uniqueUeIds.length > 0 ? `\nUnique IDs: ${diag.uniqueUeIds.join(', ')}` : '') +
+                (diag.duplicateUeIds.length > 0
+                  ? `\nDuplicate IDs: ${diag.duplicateUeIds.join(', ')}`
+                  : '') +
+                (diag.malformedCount > 0 ? `\nMalformed/dropped: ${diag.malformedCount}` : '')
+              }
+            >
+              {hasDropCount ? `${diag.rawUeCount} raw · ` : ''}
+              {diag.uniqueUeIds.length} unique
+              {diag.duplicateUeIds.length > 0 && (
+                <span className="ml-1 text-[#f6d199]">· {diag.duplicateUeIds.length} dup</span>
+              )}
+              {diag.malformedCount > 0 && (
+                <span className="ml-1 text-[#f3bcbc]">· {diag.malformedCount} malformed</span>
+              )}
+            </span>
+          )}
           {selectedUeIndex !== null && onSelectUe && (
             <button
               type="button"
@@ -80,21 +107,35 @@ export const LiveUePanel = memo(function LiveUePanel({
               </tr>
             </thead>
             <tbody className="divide-y divide-edge/40">
-              {ueList.map((ue) => {
-                const theme = getUeTheme(ue.ue);
-                const isSelected = selectedUeIndex === ue.ue;
-                const dlMbps = (ue.dl_brate / 1_000_000).toFixed(1);
-                const ulKbps = (ue.ul_brate / 1_000).toFixed(0);
-                const rntiHex = `0x${ue.rnti.toString(16).toUpperCase()}`;
+              {ueList.map((ue, idx) => {
+                const ueId = typeof ue.ue === 'number' && !isNaN(ue.ue) ? ue.ue : idx;
+                const rnti = typeof ue.rnti === 'number' && !isNaN(ue.rnti) ? ue.rnti : 0;
+                const theme = getUeTheme(ueId);
+                const isSelected = selectedUeIndex === ueId;
+                const dlMbps = ((ue.dl_brate || 0) / 1_000_000).toFixed(1);
+                const ulKbps = ((ue.ul_brate || 0) / 1_000).toFixed(0);
+                const rntiHex = rnti ? `0x${rnti.toString(16).toUpperCase()}` : '0x0';
+                const totalOk = (ue.dl_nof_ok || 0) + (ue.dl_nof_nok || 0);
                 const dlErrRate =
-                  ue.dl_nof_ok + ue.dl_nof_nok > 0
-                    ? ((ue.dl_nof_nok / (ue.dl_nof_ok + ue.dl_nof_nok)) * 100).toFixed(1)
+                  totalOk > 0
+                    ? (((ue.dl_nof_nok || 0) / totalOk) * 100).toFixed(1)
                     : '0.0';
+
+                const snr =
+                  typeof ue.pusch_snr_db === 'number' && !isNaN(ue.pusch_snr_db)
+                    ? ue.pusch_snr_db
+                    : null;
+                const rsrp =
+                  typeof ue.pusch_rsrp_db === 'number' && !isNaN(ue.pusch_rsrp_db)
+                    ? ue.pusch_rsrp_db
+                    : null;
+                const ta =
+                  typeof ue.ta_ns === 'number' && !isNaN(ue.ta_ns) ? ue.ta_ns : null;
 
                 return (
                   <tr
-                    key={ue.rnti}
-                    onClick={() => onSelectUe?.(isSelected ? null : ue.ue)}
+                    key={rnti || idx}
+                    onClick={() => onSelectUe?.(isSelected ? null : ueId)}
                     className={`cursor-pointer transition select-none ${
                       isSelected
                         ? 'bg-accent/15 ring-1 ring-inset ring-accent'
@@ -110,10 +151,10 @@ export const LiveUePanel = memo(function LiveUePanel({
                           title={`Color on resource grid: ${theme.name}`}
                         />
                         <span className="font-bold" style={{ color: theme.badgeText }}>
-                          UE {ue.ue}
+                          UE {ueId}
                         </span>
                         <span className="text-[11px] text-subtle font-mono">
-                          {rntiHex} ({ue.rnti})
+                          {rntiHex} ({rnti})
                         </span>
                         {isSelected && (
                           <span className="ml-1 text-[9px] font-extrabold uppercase px-1 rounded bg-accent/30 text-accent">
@@ -130,38 +171,44 @@ export const LiveUePanel = memo(function LiveUePanel({
                     </td>
                     <td className="px-3 py-2.5">
                       <span className="num text-ink/90">
-                        {ue.dl_mcs} / {ue.ul_mcs}
+                        {ue.dl_mcs ?? '-'} / {ue.ul_mcs ?? '-'}
                       </span>
-                      <span className="ml-1 text-[10px] text-subtle">
-                        ({ue.dl_mcs >= 20 ? '256QAM' : ue.dl_mcs >= 10 ? '64QAM' : 'QPSK'})
-                      </span>
+                      {typeof ue.dl_mcs === 'number' && (
+                        <span className="ml-1 text-[10px] text-subtle">
+                          ({ue.dl_mcs >= 20 ? '256QAM' : ue.dl_mcs >= 10 ? '64QAM' : 'QPSK'})
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5">
-                      <span className="num font-semibold text-accent">{ue.cqi}</span>
-                      <span className="text-subtle text-[11px]"> / {ue.dl_ri}L</span>
+                      <span className="num font-semibold text-accent">{ue.cqi ?? '-'}</span>
+                      <span className="text-subtle text-[11px]"> / {ue.dl_ri ?? 1}L</span>
                     </td>
                     <td className="px-3 py-2.5 font-mono">
-                      <span
-                        className={`num font-semibold ${
-                          ue.pusch_snr_db >= 20
-                            ? 'text-[#b5f0cd]'
-                            : ue.pusch_snr_db >= 10
-                              ? 'text-[#f6d199]'
-                              : 'text-[#f3bcbc]'
-                        }`}
-                      >
-                        {ue.pusch_snr_db.toFixed(1)} dB
-                      </span>
+                      {snr !== null ? (
+                        <span
+                          className={`num font-semibold ${
+                            snr >= 20
+                              ? 'text-[#b5f0cd]'
+                              : snr >= 10
+                                ? 'text-[#f6d199]'
+                                : 'text-[#f3bcbc]'
+                          }`}
+                        >
+                          {snr.toFixed(1)} dB
+                        </span>
+                      ) : (
+                        <span className="text-subtle text-xs">-</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 font-mono text-subtle">
-                      <span className="num">{ue.pusch_rsrp_db.toFixed(1)} dBm</span>
+                      <span className="num">{rsrp !== null ? `${rsrp.toFixed(1)} dBm` : '-'}</span>
                     </td>
                     <td className="px-3 py-2.5 font-mono text-subtle">
-                      <span className="num">{ue.ta_ns.toFixed(0)} ns</span>
+                      <span className="num">{ta !== null ? `${ta.toFixed(0)} ns` : '-'}</span>
                     </td>
                     <td className="px-3 py-2.5 text-[11px]">
-                      <span className="num text-[#b5f0cd] font-medium">{ue.dl_nof_ok} ok</span>
-                      {ue.dl_nof_nok > 0 && (
+                      <span className="num text-[#b5f0cd] font-medium">{ue.dl_nof_ok ?? 0} ok</span>
+                      {(ue.dl_nof_nok || 0) > 0 && (
                         <span className="num text-[#f3bcbc] ml-1.5">
                           ({ue.dl_nof_nok} err &middot; {dlErrRate}%)
                         </span>

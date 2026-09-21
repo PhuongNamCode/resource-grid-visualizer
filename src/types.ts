@@ -135,7 +135,12 @@ export interface LiveSlotAlloc {
   pucchPrbs?: number;
 }
 
-/** Live real-time metric for an active UE connected to OCUDU. */
+/**
+ * Live real-time metric for an active UE connected to OCUDU. This is REAL
+ * telemetry from the gNB `ue_list` (identity + link stats). Optional radio
+ * fields are `null` (not 0) when OCUDU omits them for a given report, so the
+ * UI can render "-" instead of a misleading value or crashing on `.toFixed()`.
+ */
 export interface LiveUeMetric {
   ue: number;
   rnti: number;
@@ -146,15 +151,53 @@ export interface LiveUeMetric {
   cqi: number;
   dl_ri: number;
   ul_ri?: number;
-  pusch_snr_db: number;
-  pusch_rsrp_db: number;
-  pucch_snr_db?: number;
-  ta_ns: number;
+  pusch_snr_db: number | null;
+  pusch_rsrp_db: number | null;
+  pucch_snr_db?: number | null;
+  ta_ns: number | null;
   dl_nof_ok: number;
   dl_nof_nok: number;
   ul_nof_ok: number;
   ul_nof_nok: number;
   bsr?: number;
+  /**
+   * Exact per-UE scheduler grants for the current report (Phase 2). Present
+   * only when OCUDU is built/configured to emit real grant geometry; absent
+   * on stock builds, in which case the UI falls back to the estimated split.
+   */
+  grants?: LiveUeGrant[];
+}
+
+/**
+ * Exact per-UE scheduler grant geometry sourced from OCUDU `sched_result`
+ * (Phase 2). Unlike the bitrate-weighted estimate, these are the real RBs and
+ * OFDM symbols the scheduler assigned to this UE in a given slot.
+ */
+export interface LiveUeGrant {
+  rnti: number;
+  ue_index: number;
+  /** Slot index within the TDD period. */
+  slot_idx: number;
+  /** CRB start (after VRB->CRB resolution). */
+  rb_start: number;
+  nof_rbs: number;
+  symbol_start: number;
+  nof_symbols: number;
+  nof_layers: number;
+  /** true = PDSCH (DL), false = PUSCH (UL). */
+  is_dl: boolean;
+}
+
+/** Diagnostics computed while normalizing the raw OCUDU `ue_list` payload. */
+export interface UeDiagnostics {
+  /** Number of raw records in `ue_list` before normalization. */
+  rawUeCount: number;
+  /** Sorted unique UE indices that survived normalization. */
+  uniqueUeIds: number[];
+  /** UE indices seen more than once in the payload. */
+  duplicateUeIds: number[];
+  /** Raw records dropped because they had no usable UE/RNTI identity. */
+  malformedCount: number;
 }
 
 /** Live real-time cell metrics from OCUDU gNodeB. */
@@ -194,6 +237,8 @@ export interface LiveTelemetryState {
   totalUlKbps: number;
   activeUeCount: number;
   ueList: LiveUeMetric[];
+  /** Normalization diagnostics for the current `ue_list` payload. */
+  ueDiagnostics: UeDiagnostics;
   cellMetrics: LiveCellMetrics | null;
   macMetrics: LiveMacMetrics | null;
   pdschSlotPrbs: number[];

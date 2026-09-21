@@ -6,7 +6,9 @@ import type {
   LiveMacMetrics,
   LiveTelemetryState,
   LiveUeMetric,
+  UeDiagnostics,
 } from '../types';
+import { buildUeTelemetry, EMPTY_UE_DIAGNOSTICS } from './normalizeUe';
 
 export function useOcuduLiveMetrics(): LiveTelemetryState {
   const defaultHost =
@@ -24,6 +26,7 @@ export function useOcuduLiveMetrics(): LiveTelemetryState {
   const [totalUlKbps, setTotalUlKbps] = useState(0);
   const [activeUeCount, setActiveUeCount] = useState(0);
   const [ueList, setUeList] = useState<LiveUeMetric[]>([]);
+  const [ueDiagnostics, setUeDiagnostics] = useState<UeDiagnostics>(EMPTY_UE_DIAGNOSTICS);
   const [cellMetrics, setCellMetrics] = useState<LiveCellMetrics | null>(null);
   const [macMetrics, setMacMetrics] = useState<LiveMacMetrics | null>(null);
   const [pdschSlotPrbs, setPdschSlotPrbs] = useState<number[]>([]);
@@ -111,14 +114,19 @@ export function useOcuduLiveMetrics(): LiveTelemetryState {
           : null;
 
       if (rawUeList) {
-        const ues: LiveUeMetric[] = rawUeList;
-        setUeList(ues);
-        setActiveUeCount(ues.length);
-
-        const totalDl = ues.reduce((acc, u) => acc + (u.dl_brate || 0), 0);
-        const totalUl = ues.reduce((acc, u) => acc + (u.ul_brate || 0), 0);
-        setTotalDlMbps(totalDl / 1_000_000);
-        setTotalUlKbps(totalUl / 1_000);
+        // Single WebSocket->UI boundary: normalize every raw record so a
+        // malformed/partial entry can never reach React and blank the page.
+        const telemetry = buildUeTelemetry(rawUeList);
+        setUeList(telemetry.ues);
+        setActiveUeCount(telemetry.ues.length);
+        setUeDiagnostics({
+          rawUeCount: telemetry.rawUeCount,
+          uniqueUeIds: telemetry.uniqueUeIds,
+          duplicateUeIds: telemetry.duplicateUeIds,
+          malformedCount: telemetry.malformedCount,
+        });
+        setTotalDlMbps(telemetry.totalDlMbps);
+        setTotalUlKbps(telemetry.totalUlKbps);
       }
 
       const metrics = cellObj.cell_metrics ?? cellObj;
@@ -252,6 +260,7 @@ export function useOcuduLiveMetrics(): LiveTelemetryState {
     totalUlKbps,
     activeUeCount,
     ueList,
+    ueDiagnostics,
     cellMetrics,
     macMetrics,
     pdschSlotPrbs,

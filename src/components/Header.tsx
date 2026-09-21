@@ -1,7 +1,7 @@
 // Copyright (C) 2026 NeuroRAN. All rights reserved.
 
 import { memo } from 'react';
-import type { CellProfile, CellProfileFile } from '../types';
+import type { CellProfile, CellProfileFile, UeDiagnostics } from '../types';
 
 interface HeaderProps {
   profileFile: CellProfileFile;
@@ -14,6 +14,7 @@ interface HeaderProps {
   onReconnect: () => void;
   activeUeCount: number;
   totalDlMbps: number;
+  ueDiagnostics: UeDiagnostics;
 }
 
 export const Header = memo(function Header({
@@ -27,7 +28,25 @@ export const Header = memo(function Header({
   onReconnect,
   activeUeCount,
   totalDlMbps,
+  ueDiagnostics,
 }: HeaderProps) {
+  const { rawUeCount, uniqueUeIds, duplicateUeIds, malformedCount } = ueDiagnostics;
+  const idsPreview =
+    uniqueUeIds.length > 0
+      ? uniqueUeIds.length <= 16
+        ? uniqueUeIds.join(', ')
+        : `${uniqueUeIds.slice(0, 16).join(', ')}…`
+      : 'none';
+  const nonContiguous =
+    uniqueUeIds.length > 1 &&
+    uniqueUeIds[uniqueUeIds.length - 1] - uniqueUeIds[0] + 1 !== uniqueUeIds.length;
+  const ueTooltip =
+    `Raw ue_list records: ${rawUeCount}\n` +
+    `Valid connected UEs: ${activeUeCount}\n` +
+    `Unique UE IDs: ${idsPreview}` +
+    (nonContiguous ? ' (non-contiguous - IDs can skip values; this is expected)' : '') +
+    (duplicateUeIds.length > 0 ? `\nDuplicate UE IDs: ${duplicateUeIds.join(', ')}` : '') +
+    (malformedCount > 0 ? `\nMalformed/dropped records: ${malformedCount}` : '');
   return (
     <header className="sticky top-0 z-10 border-b border-edge bg-panel/85 backdrop-blur">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -54,7 +73,17 @@ export const Header = memo(function Header({
               <span className="h-2 w-2 rounded-full bg-[#2bb268] animate-pulse" />
               <span className="font-semibold tracking-wide">LIVE STREAM</span>
               <span className="text-subtle">&middot;</span>
-              <span className="num font-medium text-ink/90">{activeUeCount} UEs</span>
+              <span
+                className="num font-medium text-ink/90 cursor-help underline decoration-dotted decoration-[#2bb268]/60 underline-offset-2"
+                title={ueTooltip}
+              >
+                {activeUeCount} UEs
+                {duplicateUeIds.length > 0 || malformedCount > 0 ? (
+                  <span className="ml-1 text-[#f6d199]" title={ueTooltip}>
+                    &#9888;
+                  </span>
+                ) : null}
+              </span>
               <span className="text-subtle">&middot;</span>
               <span className="num font-bold text-[#b5f0cd]">{totalDlMbps.toFixed(1)} Mbps</span>
             </div>

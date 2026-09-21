@@ -237,11 +237,15 @@ export const UE_PALETTE: Omit<UeTheme, 'ueIndex' | 'name'>[] = [
   },
 ];
 
-export function getUeTheme(ueIndex: number): UeTheme {
-  const base = UE_PALETTE[Math.abs(ueIndex) % UE_PALETTE.length];
+export function getUeTheme(ueIndex?: number | null): UeTheme {
+  const safeIdx =
+    typeof ueIndex === 'number' && !isNaN(ueIndex)
+      ? Math.abs(Math.floor(ueIndex))
+      : 0;
+  const base = UE_PALETTE[safeIdx % UE_PALETTE.length] || UE_PALETTE[0];
   return {
-    ueIndex,
-    name: `UE ${ueIndex}`,
+    ueIndex: safeIdx,
+    name: `UE ${safeIdx}`,
     ...base,
   };
 }

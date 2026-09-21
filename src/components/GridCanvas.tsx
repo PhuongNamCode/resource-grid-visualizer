@@ -22,6 +22,8 @@ export interface GridCanvasProps {
   activePrbs?: number;
   ueSlices?: UePrbSlice[];
   selectedUeIndex?: number | null;
+  /** Whether per-UE slices are exact scheduler grants (true) or estimates (false). */
+  allocationIsReal?: boolean;
 }
 
 const MARGIN = { left: 76, right: 16, top: 20, bottom: 32 };
@@ -45,6 +47,7 @@ export function GridCanvas({
   activePrbs,
   ueSlices = [],
   selectedUeIndex = null,
+  allocationIsReal = false,
 }: GridCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -189,9 +192,9 @@ export function GridCanvas({
 
           if (ueForRb) {
             const isDmrs = owner === Owner.PdschDmrs || owner === Owner.PuschDmrs;
-            fill = isDmrs ? ueForRb.theme.dmrs : ueForRb.theme.fill;
-            border = ueForRb.theme.border;
-            textColor = isDmrs ? '#07130c' : ueForRb.theme.text;
+            fill = isDmrs ? (ueForRb.theme?.dmrs ?? style.fill) : (ueForRb.theme?.fill ?? style.fill);
+            border = ueForRb.theme?.border ?? style.border;
+            textColor = isDmrs ? '#07130c' : (ueForRb.theme?.text ?? style.text);
 
             // Differentiated text label per UE
             if (cellW >= 55) {
@@ -268,9 +271,9 @@ export function GridCanvas({
 
           if (ueForRb) {
             // Draw UE color badge on left of PRB axis
-            ctx.fillStyle = ueForRb.theme.fill;
+            ctx.fillStyle = ueForRb.theme?.fill ?? '#38bdf8';
             ctx.fillRect(MARGIN.left - 70, yc - 5, 3, 10);
-            ctx.fillStyle = ueForRb.theme.badgeText;
+            ctx.fillStyle = ueForRb.theme?.badgeText ?? '#38bdf8';
             ctx.font = 'bold 9px ui-monospace, monospace';
             ctx.textAlign = 'left';
             ctx.fillText(`U${ueForRb.ueIndex}`, MARGIN.left - 64, yc);
@@ -305,12 +308,12 @@ export function GridCanvas({
           ctx.stroke();
           ctx.setLineDash([]);
 
-          // Boundary indicator tag
+          // Boundary indicator tag: marks the REAL aggregate active-PRB count.
           ctx.fillStyle = '#38bdf8';
           ctx.font = 'bold 10px ui-monospace, monospace';
           ctx.textAlign = 'right';
           ctx.fillText(
-            `⚡ OCUDU SCHEDULED CUTOFF (${activePrbs} PRBs)`,
+            `OCUDU ACTIVE PRBs: ${activePrbs} (aggregate, real)`,
             MARGIN.left + SYMBOLS_PER_SLOT * cellW - 10,
             y - 5,
           );
@@ -334,6 +337,18 @@ export function GridCanvas({
         }
       }
 
+      // Provenance caption for the per-UE coloring (estimate vs real grants).
+      if (ueSlices.length > 0) {
+        ctx.fillStyle = allocationIsReal ? '#34d399' : '#f6d199';
+        ctx.font = 'bold 9px ui-monospace, monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(
+          allocationIsReal ? 'UE grants: real (scheduler)' : 'UE partition: estimated (bitrate-weighted)',
+          MARGIN.left + 2,
+          MARGIN.top - 9,
+        );
+      }
+
       // Selection ring
       if (selected) {
         const row = topSc - selected.k;
@@ -353,7 +368,7 @@ export function GridCanvas({
     return () => {
       cancelAnimationFrame(animId);
     };
-  }, [geom, grid, emphasized, selected, prbStart, prbCount, activePrbs, ueSlices, selectedUeIndex]);
+  }, [geom, grid, emphasized, selected, prbStart, prbCount, activePrbs, ueSlices, selectedUeIndex, allocationIsReal]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;

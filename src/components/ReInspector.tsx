@@ -50,27 +50,51 @@ function Details({ grid, selected, ueSlices }: { grid: SlotGrid; selected: Selec
         <div className="flex items-center gap-2">
           <span className="h-4 w-4 rounded-sm" style={{ backgroundColor: fill, border: `1px solid ${border}` }} />
           <span className="font-semibold text-ink">
-            {ueForRb ? `${ueForRb.theme.name}: ${style.label}` : style.label}
+            {ueForRb ? `${ueForRb.theme?.name ?? `UE ${ueForRb.ueIndex}`}: ${style.label}` : style.label}
           </span>
         </div>
         {ueForRb && (
-          <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ backgroundColor: ueForRb.theme.badgeBg, color: ueForRb.theme.badgeText }}>
-            {ueForRb.theme.name} (0x{ueForRb.rnti.toString(16).toUpperCase()})
+          <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ backgroundColor: ueForRb.theme?.badgeBg, color: ueForRb.theme?.badgeText }}>
+            {ueForRb.theme?.name ?? `UE ${ueForRb.ueIndex}`} (0x{(ueForRb.rnti ?? 0).toString(16).toUpperCase()})
           </span>
         )}
       </div>
 
       {ueForRb && (
-        <div className="rounded-md border p-2 text-xs flex items-center justify-between bg-panel/60 border-edge/60">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ueForRb.theme.fill }} />
-            <span className="font-semibold text-ink">Dedicated UE Slice:</span>
-            <span className="text-subtle">RB {ueForRb.prbStart}&ndash;{ueForRb.prbEnd} ({ueForRb.prbCount} PRBs)</span>
+        <div className="space-y-1.5 rounded-md border p-2 text-xs bg-panel/60 border-edge/60">
+          {/* Live UE identity - REAL telemetry */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: ueForRb.theme?.fill ?? '#38bdf8' }} />
+              <span className="font-semibold text-ink">Live UE identity (real):</span>
+              <span className="text-subtle">
+                UE {ueForRb.ueIndex} &middot; RNTI 0x{(ueForRb.rnti ?? 0).toString(16).toUpperCase()}
+              </span>
+            </div>
+            <div className="num font-bold text-[#b5f0cd]">
+              {grid.direction === 'U'
+                ? `${(ueForRb.ulKbps || 0).toFixed(0)} kbps UL`
+                : `${(ueForRb.dlMbps || 0).toFixed(1)} Mbps DL`}
+            </div>
           </div>
-          <div className="num font-bold text-[#b5f0cd]">
-            {grid.direction === 'U'
-              ? `${ueForRb.ulKbps.toFixed(0)} kbps UL`
-              : `${ueForRb.dlMbps.toFixed(1)} Mbps DL`}
+          {/* PRB slice - real grant or estimate */}
+          <div className="flex items-center justify-between border-t border-edge/40 pt-1.5">
+            <span
+              className={`font-semibold ${ueForRb.source === 'grant' ? 'text-emerald-400' : 'text-[#f6d199]'}`}
+              title={
+                ueForRb.source === 'grant'
+                  ? 'Exact OCUDU scheduler grant (real RB allocation).'
+                  : 'Estimated bitrate-weighted PRB slice, not an exact scheduler grant.'
+              }
+            >
+              {ueForRb.source === 'grant' ? 'Scheduler grant (real):' : 'Estimated UE PRB slice:'}
+            </span>
+            <span className="text-subtle">
+              RB {ueForRb.prbStart}&ndash;{ueForRb.prbEnd} ({ueForRb.prbCount} PRBs)
+              {ueForRb.source === 'grant' && ueForRb.nofSymbols
+                ? ` · sym ${ueForRb.symbolStart}\u2013${(ueForRb.symbolStart ?? 0) + ueForRb.nofSymbols - 1}`
+                : ''}
+            </span>
           </div>
         </div>
       )}

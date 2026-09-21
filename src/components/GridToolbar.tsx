@@ -2,7 +2,7 @@ import { memo } from 'react';
 import type { CellProfile, ChannelToggles, GridParams, Owner } from '../types';
 import type { ViewState } from './ControlRail';
 import { Owner as OwnerEnum } from '../types';
-import type { UePrbSlice } from '../mapping';
+import type { UeFilterItem, UePrbSlice } from '../mapping';
 
 interface GridToolbarProps {
   profile: CellProfile;
@@ -15,8 +15,11 @@ interface GridToolbarProps {
   onPinOwners: (owners: Owner[]) => void;
   onSelectChannel?: (layerId: string, owners: Owner[]) => void;
   ueSlices?: UePrbSlice[];
+  ueFilterItems?: UeFilterItem[];
   selectedUeIndex?: number | null;
   onSelectUe?: (ueIndex: number | null) => void;
+  /** Whether per-UE slices are exact scheduler grants (true) or estimates (false). */
+  allocationIsReal?: boolean;
 }
 
 interface ChannelLayerDef {
@@ -107,8 +110,10 @@ export const GridToolbar = memo(function GridToolbar({
   onPinOwners,
   onSelectChannel,
   ueSlices = [],
+  ueFilterItems = [],
   selectedUeIndex = null,
   onSelectUe,
+  allocationIsReal = false,
 }: GridToolbarProps) {
   const prbOptions = Array.from(
     new Set([12, 24, 51, 106, 133, 273, profile.nRb].filter((n) => n <= profile.nRb)),
@@ -164,10 +169,19 @@ export const GridToolbar = memo(function GridToolbar({
         </div>
 
         {/* Row 2: UE Selector on the left below Visible PRBs */}
-        {ueSlices && ueSlices.length > 0 && onSelectUe && (
+        {ueFilterItems.length > 0 && onSelectUe && (
           <div className="flex items-center gap-1">
-            <span className="text-[11px] text-subtle font-semibold uppercase tracking-wider mr-0.5">
-              UE:
+            <span
+              className={`text-[11px] font-semibold uppercase tracking-wider mr-0.5 ${
+                allocationIsReal ? 'text-emerald-400' : 'text-[#f6d199]'
+              }`}
+              title={
+                allocationIsReal
+                  ? 'UE colors map exact OCUDU scheduler grants (real RB allocation).'
+                  : 'UE colors map an estimated bitrate-weighted PRB partition. UE identity/RNTI/throughput are real; the RB slice is an estimate.'
+              }
+            >
+              UE {allocationIsReal ? '(real grants)' : '(est. partition)'}:
             </span>
             <button
               type="button"
@@ -179,31 +193,44 @@ export const GridToolbar = memo(function GridToolbar({
               }`}
               title="Show all connected UEs on the grid"
             >
-              All ({ueSlices.length})
+              All ({ueFilterItems.length})
             </button>
-            {ueSlices.map((slice) => {
-              const isSelected = selectedUeIndex === slice.ueIndex;
+            {ueFilterItems.map((item) => {
+              const isSelected = selectedUeIndex === item.ueIndex;
+              const rntiHex = item.rnti ? `0x${item.rnti.toString(16).toUpperCase()}` : '0x0';
+              const dlSpeed = item.dlMbps.toFixed(1);
+              const fill = item.theme.fill;
+              const border = item.theme.border;
+              const currentSlices = ueSlices.filter((slice) => slice.ueIndex === item.ueIndex);
+              const grantSummary =
+                currentSlices.length > 0
+                  ? `${currentSlices.length} scheduler grant${currentSlices.length === 1 ? '' : 's'} in this slot`
+                  : 'No grant for this UE in the selected slot';
               return (
                 <button
-                  key={slice.ueIndex}
+                  key={item.ueIndex}
                   type="button"
-                  onClick={() => onSelectUe(isSelected ? null : slice.ueIndex)}
+                  onClick={() => onSelectUe(isSelected ? null : item.ueIndex)}
                   className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-bold border transition cursor-pointer ${
                     isSelected
                       ? 'ring-2 ring-white text-white shadow-md'
                       : 'border-edge/50 bg-panel/40 opacity-85 hover:opacity-100 text-ink'
                   }`}
                   style={{
-                    backgroundColor: isSelected ? slice.theme.fill : undefined,
-                    borderColor: slice.theme.border,
+                    backgroundColor: isSelected ? fill : undefined,
+                    borderColor: border,
                   }}
-                  title={`UE ${slice.ueIndex} (RNTI 0x${slice.rnti.toString(16).toUpperCase()}) \u00b7 ${slice.prbCount} PRBs (RB ${slice.prbStart}\u2013${slice.prbEnd}) \u00b7 ${slice.dlMbps.toFixed(1)} Mbps DL - click to isolate`}
+                  title={
+                    `Live UE identity (real): UE ${item.ueIndex} \u00b7 RNTI ${rntiHex} \u00b7 ${dlSpeed} Mbps DL\n` +
+                    `${allocationIsReal ? 'Scheduler grant (real)' : 'Estimated PRB slice'}: ${grantSummary}` +
+                    `\nClick to isolate this UE on the grid`
+                  }
                 >
                   <span
                     className="h-2 w-2 rounded-full shrink-0"
-                    style={{ backgroundColor: slice.theme.fill }}
+                    style={{ backgroundColor: fill }}
                   />
-                  <span>UE {slice.ueIndex}</span>
+                  <span>UE {item.ueIndex}</span>
                 </button>
               );
             })}

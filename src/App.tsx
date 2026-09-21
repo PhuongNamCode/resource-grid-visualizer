@@ -6,6 +6,9 @@ import {
   defaultParamsForProfile,
   prachSlotIndex,
   partitionUePrbs,
+  buildUeFilterItems,
+  findUeGrantFocusTarget,
+  slicesFromGrants,
   type UePrbSlice,
 } from './mapping';
 import { useProfile } from './hooks/useProfile';
@@ -85,8 +88,26 @@ export function App() {
   const activePct = params && params.nRb > 0 ? ((activePrbs / params.nRb) * 100).toFixed(1) : '0.0';
 
   const isPrachSlot = params ? selectedSlot === prachSlotIndex(params) : false;
+
+  // Whether OCUDU is emitting EXACT per-UE scheduler grants (Phase 2). When it
+  // is, we paint real allocation; otherwise we fall back to the estimated,
+  // bitrate-weighted partition and label it honestly.
+  const hasRealGrants = useMemo(
+    () => live.ueList.some((u) => Array.isArray(u.grants) && u.grants.length > 0),
+    [live.ueList],
+  );
+
   const ueSlices: UePrbSlice[] = useMemo(() => {
     if (!params || !grid) return [];
+    if (hasRealGrants) {
+      const real = slicesFromGrants({
+        ueList: live.ueList,
+        direction: grid.direction,
+        slotIdx: selectedSlot,
+        nRb: params.nRb,
+      });
+      if (real.length > 0) return real;
+    }
     return partitionUePrbs({
       activePrbs,
       ueList: live.ueList,
@@ -94,16 +115,39 @@ export function App() {
       isPrachSlot,
       nRb: params.nRb,
     });
-  }, [params, grid, isPrachSlot, activePrbs, live.ueList]);
+  }, [params, grid, isPrachSlot, activePrbs, live.ueList, hasRealGrants, selectedSlot]);
+
+  // True only when the currently displayed slices come from real scheduler grants.
+  const allocationIsReal = ueSlices.length > 0 && ueSlices[0].source === 'grant';
+  const ueFilterItems = useMemo(() => buildUeFilterItems(live.ueList), [live.ueList]);
 
   const handleSelectUe = (ueIndex: number | null) => {
     setSelectedUeIndex(ueIndex);
     if (ueIndex === null || !params) return;
 
     const slice = ueSlices.find((s) => s.ueIndex === ueIndex);
+    let targetStart: number | undefined;
+    let targetCount: number | undefined;
+
     if (slice && slice.prbCount > 0) {
-      const targetCount = Math.min(params.nRb, Math.max(12, slice.prbCount + 4));
-      const targetStart = Math.max(0, Math.min(slice.prbStart - 2, params.nRb - targetCount));
+      targetCount = Math.min(params.nRb, Math.max(12, slice.prbCount + 4));
+      targetStart = Math.max(0, Math.min(slice.prbStart - 2, params.nRb - targetCount));
+    } else {
+      const ue = live.ueList.find((item) => item.ue === ueIndex);
+      const focus = findUeGrantFocusTarget({
+        grants: ue?.grants,
+        currentSlot: selectedSlot,
+        currentDirection: grid?.direction ?? 'D',
+        nRb: params.nRb,
+      });
+      if (focus) {
+        setSelectedSlot(focus.slotIdx);
+        targetCount = Math.min(params.nRb, Math.max(12, focus.prbEnd - focus.prbStart + 5));
+        targetStart = Math.max(0, Math.min(focus.prbStart - 2, params.nRb - targetCount));
+      }
+    }
+
+    if (targetStart !== undefined && targetCount !== undefined) {
       setView((v) => (v ? { ...v, prbStart: targetStart, prbCount: targetCount } : v));
     }
   };
@@ -287,6 +331,7 @@ export function App() {
         onReconnect={live.reconnect}
         activeUeCount={live.activeUeCount}
         totalDlMbps={live.totalDlMbps}
+        ueDiagnostics={live.ueDiagnostics}
       />
 
       <main className="mx-auto max-w-[1800px] p-3 space-y-3">
@@ -311,8 +356,10 @@ export function App() {
           onPinOwners={setPinnedOwners}
           onSelectChannel={handleChannelClick}
           ueSlices={ueSlices}
+          ueFilterItems={ueFilterItems}
           selectedUeIndex={selectedUeIndex}
           onSelectUe={handleSelectUe}
+          allocationIsReal={allocationIsReal}
         />
 
         <div className="card p-3">
@@ -347,7 +394,12 @@ export function App() {
           {/* Live allocation verification pill */}
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs bg-panel/60 rounded px-2.5 py-1 text-subtle">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-emerald-400 font-semibold">● Scheduled Spectrum:</span>
+              <span
+                className="text-emerald-400 font-semibold"
+                title="Aggregate active PRBs for this slot, straight from OCUDU pdsch/pusch_prbs_used_per_tdd_slot_idx. This total is real telemetry."
+              >
+                ● Active PRBs (real aggregate):
+              </span>
               <span className="text-ink font-medium">
                 {activePrbs <= 0
                   ? 'None (0 PRBs)'
@@ -383,10 +435,32 @@ export function App() {
                 </>
               )}
             </div>
-            <div className="text-[11px] text-subtle">
-              {grid.direction === 'D' || grid.direction === 'S' ? 'PDSCH DL Allocation' : 'PUSCH UL Allocation'}
+            <div
+              className="text-[11px] font-medium"
+              title={
+                allocationIsReal
+                  ? 'Per-UE colored regions are EXACT OCUDU scheduler grants (real RB allocation).'
+                  : 'Per-UE colored regions are an ESTIMATED bitrate-weighted partition of the aggregate active PRBs - not exact scheduler grants. Enable OCUDU per-UE grant telemetry for real allocation.'
+              }
+            >
+              {allocationIsReal ? (
+                <span className="text-emerald-400">
+                  Real UE grants &middot; {grid.direction === 'D' || grid.direction === 'S' ? 'PDSCH DL' : 'PUSCH UL'}
+                </span>
+              ) : (
+                <span className="text-[#f6d199]">
+                  Estimated UE PRB partition &middot; {grid.direction === 'D' || grid.direction === 'S' ? 'PDSCH DL' : 'PUSCH UL'}
+                </span>
+              )}
             </div>
           </div>
+
+          {/* Honesty banner: clarifies the per-UE coloring provenance whenever UEs are shown */}
+          {ueSlices.length > 0 && !allocationIsReal && (
+            <div className="mb-2 rounded border border-[#f7bd6e]/40 bg-[#f2a541]/10 px-2.5 py-1 text-[11px] text-[#f6d199]">
+              Per-UE colors below are an <span className="font-semibold">estimated</span> bitrate-weighted partition of the {activePrbs} aggregate active PRBs, not exact OCUDU scheduler grants. UE identity, RNTI, and throughput are real; the RB slice per UE is an estimate.
+            </div>
+          )}
 
           <GridCanvas
             grid={grid}
@@ -400,6 +474,7 @@ export function App() {
             activePrbs={activePrbs}
             ueSlices={ueSlices}
             selectedUeIndex={selectedUeIndex}
+            allocationIsReal={allocationIsReal}
           />
         </div>
 
@@ -411,6 +486,7 @@ export function App() {
           totalUlKbps={live.totalUlKbps}
           selectedUeIndex={selectedUeIndex}
           onSelectUe={handleSelectUe}
+          ueDiagnostics={live.ueDiagnostics}
         />
 
         {/* 3GPP Specification Cards placed below Active UEs Telemetry */}

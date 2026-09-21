@@ -1,10 +1,17 @@
 // Copyright (C) 2026 NeuroRAN. All rights reserved.
 
 import { describe, expect, it } from 'vitest';
-import { partitionUePrbs, findUeForPrb } from './ueAllocation';
+import {
+  buildUeFilterItems,
+  findUeForPrb,
+  findUeGrantFocusTarget,
+  partitionUePrbs,
+} from './ueAllocation';
 import type { LiveUeMetric } from '../types';
 
-describe('ueAllocation (Multi-UE Spectrum Partitioning)', () => {
+// NOTE: partitionUePrbs produces an ESTIMATED, bitrate-weighted PRB partition -
+// NOT exact OCUDU scheduler grants. See slicesFromGrants for real grant geometry.
+describe('estimated UE PRB partition (bitrate-weighted, not real grants)', () => {
   const sampleUeList: LiveUeMetric[] = [
     {
       ue: 0,
@@ -166,5 +173,175 @@ describe('ueAllocation (Multi-UE Spectrum Partitioning)', () => {
   it('returns empty array when ueList is empty or activePrbs is 0', () => {
     expect(partitionUePrbs({ activePrbs: 24, ueList: [], direction: 'D', nRb: 133 })).toEqual([]);
     expect(partitionUePrbs({ activePrbs: 0, ueList: sampleUeList, direction: 'D', nRb: 133 })).toEqual([]);
+  });
+
+  it('builds one stable filter item per UE in deterministic order', () => {
+    const duplicateAndUnordered = [
+      { ...sampleUeList[2], grants: [{ slot_idx: 0, is_dl: true, rb_start: 0, nof_rbs: 4, symbol_start: 2, nof_symbols: 12, rnti: 0x4733, ue_index: 2, nof_layers: 1 }] },
+      { ...sampleUeList[0], grants: [{ slot_idx: 0, is_dl: true, rb_start: 4, nof_rbs: 4, symbol_start: 2, nof_symbols: 12, rnti: 0x4731, ue_index: 0, nof_layers: 1 }] },
+      { ...sampleUeList[0], dl_brate: 1, grants: [] },
+      sampleUeList[1],
+    ];
+
+    const items = buildUeFilterItems(duplicateAndUnordered);
+
+    expect(items.map((item) => item.ueIndex)).toEqual([0, 1, 2]);
+    expect(items.map((item) => item.rnti)).toEqual([0x4731, 0x4732, 0x4733]);
+  });
+
+  it('keeps the filter membership stable when grant slices change', () => {
+    const withManyGrants = sampleUeList.map((ue) => ({
+      ...ue,
+      grants: [
+        {
+          slot_idx: 0,
+          is_dl: true,
+          rb_start: 0,
+          nof_rbs: 4,
+          symbol_start: 2,
+          nof_symbols: 12,
+          rnti: ue.rnti,
+          ue_index: ue.ue,
+          nof_layers: 1,
+        },
+        {
+          slot_idx: 1,
+          is_dl: false,
+          rb_start: 8,
+          nof_rbs: 2,
+          symbol_start: 0,
+          nof_symbols: 14,
+          rnti: ue.rnti,
+          ue_index: ue.ue,
+          nof_layers: 1,
+        },
+      ],
+    }));
+    const withNoCurrentSlotGrants = withManyGrants.map((ue) => ({ ...ue, grants: [] }));
+
+    expect(buildUeFilterItems(withManyGrants).map((item) => item.ueIndex)).toEqual(
+      buildUeFilterItems(withNoCurrentSlotGrants).map((item) => item.ueIndex),
+    );
+  });
+
+  it('finds a valid real grant when the UE has no grant in the current slot', () => {
+    const target = findUeGrantFocusTarget({
+      currentSlot: 8,
+      currentDirection: 'U',
+      nRb: 133,
+      grants: [
+        {
+          slot_idx: 1,
+          is_dl: true,
+          rb_start: 20,
+          nof_rbs: 8,
+          symbol_start: 2,
+          nof_symbols: 12,
+          rnti: 0x4731,
+          ue_index: 0,
+          nof_layers: 1,
+        },
+        {
+          slot_idx: 8,
+          is_dl: false,
+          rb_start: 40,
+          nof_rbs: 5,
+          symbol_start: 0,
+          nof_symbols: 14,
+          rnti: 0x4731,
+          ue_index: 0,
+          nof_layers: 1,
+        },
+        {
+          slot_idx: 3,
+          is_dl: false,
+          rb_start: -1,
+          nof_rbs: 5,
+          symbol_start: 0,
+          nof_symbols: 14,
+          rnti: 0x4731,
+          ue_index: 0,
+          nof_layers: 1,
+        },
+      ],
+    });
+
+    expect(target).toMatchObject({
+      slotIdx: 8,
+      isDl: false,
+      prbStart: 40,
+      prbEnd: 44,
+      symbolStart: 0,
+      nofSymbols: 14,
+    });
+  });
+
+  it('prefers the current direction, then the nearest deterministic grant', () => {
+    const target = findUeGrantFocusTarget({
+      currentSlot: 5,
+      currentDirection: 'D',
+      nRb: 133,
+      grants: [
+        {
+          slot_idx: 9,
+          is_dl: false,
+          rb_start: 60,
+          nof_rbs: 2,
+          symbol_start: 0,
+          nof_symbols: 14,
+          rnti: 0x4731,
+          ue_index: 0,
+          nof_layers: 1,
+        },
+        {
+          slot_idx: 6,
+          is_dl: true,
+          rb_start: 10,
+          nof_rbs: 3,
+          symbol_start: 2,
+          nof_symbols: 12,
+          rnti: 0x4731,
+          ue_index: 0,
+          nof_layers: 1,
+        },
+        {
+          slot_idx: 4,
+          is_dl: true,
+          rb_start: 30,
+          nof_rbs: 3,
+          symbol_start: 2,
+          nof_symbols: 12,
+          rnti: 0x4731,
+          ue_index: 0,
+          nof_layers: 1,
+        },
+      ],
+    });
+
+    expect(target?.slotIdx).toBe(4);
+    expect(target?.isDl).toBe(true);
+  });
+
+  it('returns no focus target when all grants are malformed', () => {
+    expect(
+      findUeGrantFocusTarget({
+        currentSlot: 0,
+        currentDirection: 'D',
+        nRb: 133,
+        grants: [
+          {
+            slot_idx: 0,
+            is_dl: true,
+            rb_start: 133,
+            nof_rbs: 2,
+            symbol_start: 2,
+            nof_symbols: 12,
+            rnti: 0x4731,
+            ue_index: 0,
+            nof_layers: 1,
+          },
+        ],
+      }),
+    ).toBeUndefined();
   });
 });
